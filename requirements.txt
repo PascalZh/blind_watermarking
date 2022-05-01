@@ -1,0 +1,7 @@
+scikit-opt
+PyWavelets
+scikit-image
+numpy
+opencv-python-headless
+matplotlib
+PyQt5
