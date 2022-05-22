@@ -262,8 +262,6 @@ def extract_watermark_from_svds(SVDs, embed_indices, extract_model, watermark_sh
         img: watermark image
     """
 
-    print('len(embed_indices) = ', len(embed_indices))
-    print('len(SVDs) = ', len(SVDs))
     watermark = np.zeros(len(embed_indices), dtype=np.uint8)
     if extract_model is None:
         for i, ind in enumerate(embed_indices):
@@ -359,7 +357,7 @@ def generate_optimization_problem(img, watermark, embed_model, extract_model, ve
 
         extracted_watermark, _ = extract_watermark(
             attacked_img, embed_indices, extract_model, watermark.shape)
-        plt.imshow(extracted_watermark)
+        # plt.imshow(extracted_watermark)
 
         psnr = compare_psnr(img, watermarked_img)
         nc = compare_nc(watermark, extracted_watermark)
@@ -372,9 +370,9 @@ def generate_optimization_problem(img, watermark, embed_model, extract_model, ve
 
 def test_with(func):
     imgs = dict((f, cv2.imread(f))
-                for f in ['./test/BaboonRGB.bmp', './test/LenaRGB.bmp'])
+                for f in ['./test/BaboonRGB.bmp', './test/LenaRGB.bmp', './test/PeppersRGB.bmp', './test/1.bmp'])
     watermarks = dict((f, cv2.imread(f, 0))
-                      for f in ['./test/watermark1.png'])
+                      for f in ['./test/watermark1.png', './test/watermark2.png'])
 
     def attack_gaussian_noise_0_001(img):
         return attack_gaussian_noise(img, var=0.001)
@@ -390,6 +388,9 @@ def test_with(func):
 
     attacks = [
         attack_gaussian_noise_0_001,
+        attack_gaussian_noise_0_005,
+        attack_salt_and_pepper_0_001,
+        attack_speckle_0_001
     ]
     for (img_path, watermark_path, attack) in itertools.product(imgs.keys(), watermarks.keys(), attacks):
         print(
@@ -411,8 +412,8 @@ def create_extract_model():
         extracted_watermark, SVDs = extract_watermark(
             attacked_img, embed_indices, None, watermark.shape)
 
-        plt.figure()
-        plt.imshow(watermarked_img)
+        # plt.figure()
+        # plt.imshow(watermarked_img)
         watermark_ = arnold_transform(watermark).flatten()
         for i, ind in enumerate(embed_indices):
             extract_dataset.add_data(
@@ -471,16 +472,26 @@ if False:
     exit(0)
 
 # ========================= test optimization problem ============================
-img = cv2.imread('./test/LenaRGB.bmp')
-watermark = cv2.imread('./test/watermark1.png', 0)
-fitness = generate_optimization_problem(
-    img, watermark, None, extract_model, verbose=True)
-fitness2 = generate_optimization_problem(
-    img, watermark, None, None, verbose=True)
 
-fitness(0.5)
-fitness2(0.5)
-plt.show()
+
+def test_svm_extract():
+    for img_path in ['LenaRGB.bmp', 'BaboonRGB.bmp', 'PeppersRGB.bmp']:
+        img = cv2.imread(f'./test/{img_path}')
+        print('Testing with image:', img_path)
+        watermark = cv2.imread('./test/watermark1.png', 0)
+        fitness = generate_optimization_problem(
+            img, watermark, None, extract_model, verbose=True)
+        fitness2 = generate_optimization_problem(
+            img, watermark, None, None, verbose=True)
+
+        print('Using SVM to extract watermark')
+        fitness(0.5)
+        print('Using normal algorithm to extract watermark')
+        fitness2(0.5)
+    plt.show()
+
+
+test_svm_extract()
 exit(0)
 
 
