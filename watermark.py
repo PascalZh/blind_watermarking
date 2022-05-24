@@ -85,6 +85,35 @@ def attack_speckle(image, mean, var):
     return skimage.img_as_ubyte(skimage.util.random_noise(image, mode='speckle', mean=mean, var=var))
 
 
+def attack_jpeg_compression(image, quality):
+    cv2.imwrite('tmp.jpeg', image, params=[cv2.IMWRITE_JPEG_QUALITY, quality])
+    return cv2.imread('tmp.jpeg')
+
+
+def attack_gaussian_noise_0_001(img):
+    return attack_gaussian_noise(img, var=0.001)
+
+
+def attack_gaussian_noise_0_005(img):
+    return attack_gaussian_noise(img, var=0.005)
+
+
+def attack_salt_and_pepper_0_001(img):
+    return attack_salt_and_pepper(img, amount=0.001)
+
+
+def attack_speckle_0_001(img):
+    return attack_speckle(img, mean=0, var=0.001)
+
+
+def attack_jpeg_compression_50(img):
+    return attack_jpeg_compression(img, quality=50)
+
+
+def attack_jpeg_compression_100(img):
+    return attack_jpeg_compression(img, quality=100)
+
+
 def arnold_transform(img, key=5):
     r = img.shape[0]
     c = img.shape[1]
@@ -346,14 +375,14 @@ def extract_watermark(img, embed_indices, extract_model, watermark_shape):
     return watermark, SVDs
 
 
-def generate_optimization_problem(img, watermark, embed_model, extract_model, verbose=False):
+def generate_optimization_problem(img, watermark, attack, embed_model, extract_model, verbose=False):
     lam = 42
 
     def fitness(a):
         watermarked_img, embed_indices = embed_watermark(
             img, watermark, embed_model, a=a)
 
-        attacked_img = attack_gaussian_noise(watermarked_img, 0.001)
+        attacked_img = attack(watermarked_img)
 
         extracted_watermark, _ = extract_watermark(
             attacked_img, embed_indices, extract_model, watermark.shape)
@@ -362,39 +391,22 @@ def generate_optimization_problem(img, watermark, embed_model, extract_model, ve
         psnr = compare_psnr(img, watermarked_img)
         nc = compare_nc(watermark, extracted_watermark)
         if verbose:
-            print(f'a={a}, psnr={psnr}, nc={nc}')
+            print(
+                f'a=\033[34m{a}\033[0m, psnr=\033[35m{psnr}\033[0m, nc=\033[36m{nc}\033[0m')
 
         return - psnr - lam * nc
     return fitness
 
 
-def test_with(func):
-    imgs = dict((f, cv2.imread(f))
-                for f in ['./test/BaboonRGB.bmp', './test/LenaRGB.bmp', './test/PeppersRGB.bmp', './test/1.bmp'])
-    watermarks = dict((f, cv2.imread(f, 0))
-                      for f in ['./test/watermark1.png', './test/watermark2.png'])
+def test_with(func, img_paths, watermark_paths, attacks):
+    imgs = dict((f, cv2.imread(f)) for f in img_paths)
+    watermarks = dict((f, cv2.imread(f, 0)) for f in watermark_paths)
 
-    def attack_gaussian_noise_0_001(img):
-        return attack_gaussian_noise(img, var=0.001)
-
-    def attack_gaussian_noise_0_005(img):
-        return attack_gaussian_noise(img, var=0.005)
-
-    def attack_salt_and_pepper_0_001(img):
-        return attack_salt_and_pepper(img, amount=0.001)
-
-    def attack_speckle_0_001(img):
-        return attack_speckle(img, mean=0, var=0.001)
-
-    attacks = [
-        attack_gaussian_noise_0_001,
-        attack_gaussian_noise_0_005,
-        attack_salt_and_pepper_0_001,
-        attack_speckle_0_001
-    ]
     for (img_path, watermark_path, attack) in itertools.product(imgs.keys(), watermarks.keys(), attacks):
         print(
-            f'test with: img_path={img_path},\t watermark_path={watermark_path},\t attack={attack.__name__}')
+            f'\nTest with: img_path=\033[33m{img_path}\033[0m,'
+            + f'\t watermark_path=\033[33m{watermark_path}\033[0m,'
+            + f'\t attack=\033[33m{attack.__name__}\033[0m')
         func(imgs[img_path], watermarks[watermark_path], attack)
 
 
@@ -419,15 +431,25 @@ def create_extract_model():
             extract_dataset.add_data(
                 np.array([SVDs[ind][1]]), np.array([1 if watermark_[i] == 255 else 0]))
 
-    test_with(func)
+    img_paths = ['./test/BaboonRGB.bmp', './test/LenaRGB.bmp',
+                 './test/PeppersRGB.bmp', './test/1.bmp']
+    watermark_paths = ['./test/watermark1.png', './test/watermark2.png']
+    attacks = [
+        attack_gaussian_noise_0_001,
+        attack_gaussian_noise_0_005,
+        attack_salt_and_pepper_0_001,
+        attack_speckle_0_001
+    ]
+    test_with(func, img_paths, watermark_paths, attacks)
     extract_dataset.dump()
 
 
+# 下面几行用于生成提取水印模型的训练数据集
 # create_extract_model()
 # plt.show()
 # exit(0)
 
-# ============================== Models ================================
+# ============================== Loading Models ================================
 start = time.time()
 g_dataset = SVM_Dataset()
 g_dataset.toggle_adding_data = False
@@ -440,37 +462,6 @@ extract_model = SVC()
 extract_model.fit(*extract_dataset.get_dataset())
 print(f'Training models time: {time.time() - start}')
 
-# ======================= embed and extract ============================
-if False:
-    # read image
-    img = cv2.imread('./9.bmp')
-    watermark = cv2.imread('./watermark.png', 0)
-
-    assert((arnold_invert_transform(arnold_transform(
-        watermark)) == watermark).all())
-
-    print(f'Shape of source image: {img.shape}')
-    print(f'Shape of watermark image: {watermark.shape}')
-
-    start = time.time()
-    watermarked, embed_indices = embed_watermark(img, watermark, embed_model)
-    extracted_watermark, _ = extract_watermark(
-        watermarked, embed_indices, None, watermark.shape)
-    print(f'Running embed/extract time: {time.time() - start}')
-
-    cv2.imwrite('./output/watermarked.png', watermarked)
-    cv2.imwrite('./output/extracted_watermark.png', extracted_watermark)
-
-    # calculate psnr
-    psnr = compare_psnr(img, watermarked)
-    nc = compare_nc(watermark, extracted_watermark)
-    print(f'PSNR: {psnr}, NC: {nc}')
-
-    if g_dataset.toggle_adding_data:
-        g_dataset.dump()
-
-    exit(0)
-
 # ========================= test optimization problem ============================
 
 
@@ -480,9 +471,9 @@ def test_svm_extract():
         print('Testing with image:', img_path)
         watermark = cv2.imread('./test/watermark1.png', 0)
         fitness = generate_optimization_problem(
-            img, watermark, None, extract_model, verbose=True)
+            img, watermark, lambda x: x, None, extract_model, verbose=True)
         fitness2 = generate_optimization_problem(
-            img, watermark, None, None, verbose=True)
+            img, watermark, lambda x: x, None, None, verbose=True)
 
         print('Using SVM to extract watermark')
         fitness(0.5)
@@ -491,28 +482,51 @@ def test_svm_extract():
     plt.show()
 
 
-test_svm_extract()
-exit(0)
+# 对比SVM进行水印提取和普通水印提取方法
+# test_svm_extract()
+# exit(0)
+
+# =========================== 运行算法 ============================
+
+def run(img, watermark, attack, show=False, use_pso=False, use_extract_model=False):
+    print(f'Configurations: use_pso={use_pso}, use_extract_model={use_extract_model}')
+
+    fitness = generate_optimization_problem(
+        img, watermark, attack, None, extract_model if use_extract_model else None, verbose=False)
+    fitness_v = generate_optimization_problem(
+        img, watermark, attack, None, extract_model if use_extract_model else None, verbose=True)
+    
+    if not use_pso:
+        fitness_v(0.5)
+
+    def fitness_wrapper(a):
+        return fitness(a)
+
+    start = time.time()
+    pso = PSO(func=fitness_wrapper, n_dim=1, pop=5, max_iter=50,
+              lb=[0.2], ub=[1], w=0.2, c1=0.5, c2=0.5)
+    pso.run()
+    print(f'Running PSO time: {time.time() - start}')
+
+    print('best_x is ', pso.gbest_x, 'best_y is', pso.gbest_y)
+    fitness_v(pso.gbest_x)
+
+    if show:
+        plt.figure()
+        plt.plot(pso.gbest_y_hist)
 
 
-def fitness_wrapper(a):
-    return fitness(a)
+img_paths = ['./test/BaboonRGB.bmp', './test/LenaRGB.bmp',
+             './test/PeppersRGB.bmp', './test/1.bmp']
+watermark_paths = ['./test/watermark1.png']
+attacks = [
+    attack_gaussian_noise_0_001,
+    attack_gaussian_noise_0_005,
+    attack_salt_and_pepper_0_001,
+    attack_speckle_0_001,
+    attack_jpeg_compression_50,
+    attack_jpeg_compression_100
+]
 
-
-# set_run_mode require fitness to be a function, thus need to wrap it
-set_run_mode(fitness_wrapper, 'multiprocessing')
-
-fitness_v = generate_optimization_problem(
-    img, watermark, embed_model, verbose=True)
-
-start = time.time()
-pso = PSO(func=fitness_wrapper, n_dim=1, pop=5, max_iter=50,
-          lb=[0.2], ub=[1], w=0.2, c1=0.5, c2=0.5)
-pso.run()
-print(f'Running PSO time: {time.time() - start}')
-
-print('best_x is ', pso.gbest_x, 'best_y is', pso.gbest_y)
-fitness_v(pso.gbest_x)
-
-plt.plot(pso.gbest_y_hist)
-plt.show()
+func = lambda img, watermark, attack: run(img, watermark, attack, use_extract_model=True, use_pso=True)
+test_with(func, img_paths, watermark_paths, attacks)
